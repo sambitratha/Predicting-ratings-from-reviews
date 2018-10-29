@@ -10,11 +10,22 @@ import pickle
 import nltk
 import numpy as np
 import PreProcess as pre
+import os
 
 
 words = None
 wordmap = None
 reviews = None
+users = None
+products = None
+D = 10
+
+
+def save_info(information):
+	for info in information:
+		infofile = open(info, 'ab')
+		pickle.dump(information[info], infofile)
+		infofile.close()
 
 def load_wordmap():
 	global words, wordmap
@@ -29,14 +40,16 @@ def train(epochs, reviews, users, products):
 	for epoch in range(epochs):
 		loss = {}
 		totalerror = 0.0
+		rootmean = 0.0
 		for pair in reviews:
 			reviewtext = reviews[pair][:-1]
 			actualrating = float(reviews[pair][-1])
 			predictedrating = predict(reviewtext, pair[0], pair[1])
 			error = predictedrating - actualrating
 			loss[(pair[0], pair[1])] = error
-			totalerror += error
-		print "epoch ", epoch, "error = ", totalerror
+			totalerror += abs(error)
+			rootmean += error * error
+		print "epoch ", epoch, "error = ", totalerror, " rootmean = " , (rootmean/len(reviews)) ** 0.5
 		update(loss, reviews)
 
 
@@ -52,11 +65,11 @@ def predict(review, user, product):
 
 def update(loss, reviews):
 	global model
-
+	lr = 0.000003
 	#update 'W' parameter of model
 	for (userid, productid) in loss:
 		for word in reviews[(userid, productid)][:-1]:
-			model["W"][words.index(word)] -= 0.000003 * loss[(userid, productid)]
+			model["W"][words.index(word)] -= lr * loss[(userid, productid)]
 
 	#update 'U' parameter of model
 	for user in users:
@@ -66,7 +79,7 @@ def update(loss, reviews):
 			factor = np.zeros(D)
 			for word in reviews[(userid, product)][:-1]:
 				factor += model["P"][words.index(word)]
-			model["U"][userid] -= 0.000003 * loss[(userid, product)] * (factor * model["V"][product])
+			model["U"][userid] -= lr * loss[(userid, product)] * (factor * model["V"][product])
 
 	#update 'V' parameter of model
 	for product in products:
@@ -76,16 +89,30 @@ def update(loss, reviews):
 			factor = np.zeros(D)
 			for word in reviews[(user, productid)][:-1]:
 				factor += model["P"][words.index(word)]
-			model["V"][productid] -= 0.000003 * loss[(user, productid)] * (factor * model["U"][user])
+			model["V"][productid] -= lr * loss[(user, productid)] * (factor * model["U"][user])
 
 	#update 'P' parameter of model
 	for wordid in range(len(words)):
 		for (userid, productid) in reviews:
 			if words[wordid] in reviews[(userid, productid)][:-1]:
-				model["P"][wordid] -= 0.000003 * loss[(userid, productid)] * (model["U"][userid] * model["V"][productid])
+				model["P"][wordid] -= lr * loss[(userid, productid)] * (model["U"][userid] * model["V"][productid])
 
 
-D = 10
+
+def build_model():
+	if os.path.exists("model"):
+		modelfile = open("model", 'rb')
+		model = pickle.load(modelfile)
+		return model
+	else:
+		model = {
+		"W" : np.random.rand(len(words)),
+		"U" : np.random.rand(len(users), D),
+		"V" : np.random.rand(len(products), D),
+		"P" : np.random.rand(len(words), D)	
+		}
+		return model
+
 
 if __name__ == '__main__':
 	pre.extract_words()
@@ -93,12 +120,9 @@ if __name__ == '__main__':
 	reviews = pre.getreviews()
 	products = pre.getproducts()
 	users = pre.getusers()
-	model = {
-		"W" : np.random.rand(len(words)),
-		"U" : np.random.rand(len(users), D),
-		"V" : np.random.rand(len(products), D),
-		"P" : np.random.rand(len(words), D)	
-	}
-	epochs = 10
+	model = build_model()
+
+	epochs = 20
 	train(epochs, reviews, users, products)
+	save_info({"model": model})
 
